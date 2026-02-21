@@ -1,0 +1,1550 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <title>SecureTerminal - iOS Terminal (No Python Required)</title>
+    
+    <!-- Framework7 iOS Styles -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/framework7@8.3.4/framework7-bundle.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/framework7@8.3.4/framework7-ios.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/framework7-icons@5.0.5/css/framework7-icons.min.css">
+    
+    <!-- xterm.js for professional terminal emulation -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm/css/xterm.css" />
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        /* iOS Status Bar */
+        .ios-status-bar {
+            height: 44px;
+            background: rgba(255,255,255,0.9);
+            backdrop-filter: saturate(180%) blur(20px);
+            display: flex;
+            justify-content: space-between;
+            padding: 0 20px;
+            align-items: center;
+            font-size: 15px;
+            font-weight: 600;
+            color: #000;
+            border-bottom: 1px solid rgba(0,0,0,0.1);
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 1000;
+        }
+
+        .dark .ios-status-bar {
+            background: rgba(0,0,0,0.9);
+            color: #fff;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .time {
+            font-weight: 500;
+        }
+
+        .status-icons {
+            display: flex;
+            gap: 8px;
+        }
+
+        /* Login Screen */
+        .login-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: #f5f5f5;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+            transition: all 0.3s ease;
+            padding-top: 44px;
+        }
+
+        .dark .login-screen {
+            background: #000;
+        }
+
+        .login-screen.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .login-card {
+            width: 340px;
+            background: rgba(255,255,255,0.9);
+            backdrop-filter: blur(20px);
+            border-radius: 28px;
+            padding: 32px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            border: 1px solid rgba(255,255,255,0.3);
+        }
+
+        .dark .login-card {
+            background: rgba(28,28,30,0.9);
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .login-logo {
+            text-align: center;
+            margin-bottom: 24px;
+        }
+
+        .login-logo i {
+            font-size: 48px;
+            color: #007aff;
+            background: rgba(0,122,255,0.1);
+            padding: 20px;
+            border-radius: 50%;
+        }
+
+        .login-title {
+            font-size: 24px;
+            font-weight: 600;
+            text-align: center;
+            margin-bottom: 8px;
+            color: #000;
+        }
+
+        .dark .login-title {
+            color: #fff;
+        }
+
+        .login-subtitle {
+            font-size: 15px;
+            color: #8e8e93;
+            text-align: center;
+            margin-bottom: 24px;
+        }
+
+        .login-field {
+            margin-bottom: 20px;
+        }
+
+        .login-field label {
+            display: block;
+            font-size: 14px;
+            font-weight: 500;
+            color: #8e8e93;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .login-input {
+            width: 100%;
+            padding: 16px;
+            background: rgba(255,255,255,0.8);
+            border: 1px solid rgba(0,0,0,0.1);
+            border-radius: 14px;
+            font-size: 16px;
+            color: #000;
+            transition: all 0.2s;
+        }
+
+        .dark .login-input {
+            background: rgba(44,44,46,0.8);
+            border: 1px solid rgba(255,255,255,0.1);
+            color: #fff;
+        }
+
+        .login-input:focus {
+            outline: none;
+            border-color: #007aff;
+            box-shadow: 0 0 0 4px rgba(0,122,255,0.1);
+        }
+
+        .login-button {
+            width: 100%;
+            padding: 16px;
+            background: #007aff;
+            border: none;
+            border-radius: 14px;
+            font-size: 17px;
+            font-weight: 600;
+            color: white;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-top: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .login-button:hover {
+            background: #005bbf;
+        }
+
+        .login-button:active {
+            transform: scale(0.98);
+        }
+
+        .login-error {
+            color: #ff3b30;
+            font-size: 14px;
+            margin-top: 8px;
+            text-align: center;
+            min-height: 20px;
+        }
+
+        .login-info {
+            margin-top: 20px;
+            padding: 12px;
+            background: rgba(0,122,255,0.1);
+            border-radius: 12px;
+            font-size: 13px;
+            color: #007aff;
+            text-align: center;
+        }
+
+        .dark .login-info {
+            background: rgba(0,122,255,0.2);
+        }
+
+        /* Terminal Container */
+        .terminal-container {
+            position: fixed;
+            top: 44px;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: #1e1e1e;
+            display: none;
+        }
+
+        .terminal-container.visible {
+            display: block;
+        }
+
+        .terminal-toolbar {
+            background: #2d2d2d;
+            padding: 8px 16px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            border-bottom: 1px solid #3d3d3d;
+            height: 48px;
+        }
+
+        .terminal-toolbar i {
+            color: #8e8e93;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 18px;
+        }
+
+        .terminal-toolbar i:hover {
+            color: #007aff;
+        }
+
+        .terminal-toolbar i:active {
+            transform: scale(0.95);
+        }
+
+        .terminal-title {
+            flex: 1;
+            font-size: 14px;
+            color: #8e8e93;
+            font-family: 'Menlo', 'Monaco', monospace;
+        }
+
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: #8e8e93;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 4px;
+            background: #4cd964;
+            transition: background 0.3s;
+        }
+
+        .status-dot.disconnected {
+            background: #ff3b30;
+        }
+
+        .status-dot.connecting {
+            background: #ffcc00;
+        }
+
+        #terminal {
+            height: calc(100vh - 92px);
+            padding: 4px;
+        }
+
+        /* Toast Notification */
+        .toast {
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.8);
+            backdrop-filter: blur(20px);
+            color: white;
+            padding: 12px 24px;
+            border-radius: 30px;
+            font-size: 14px;
+            font-weight: 500;
+            z-index: 3000;
+            border: 1px solid rgba(255,255,255,0.1);
+            display: none;
+            align-items: center;
+            gap: 8px;
+            min-width: 200px;
+            justify-content: center;
+        }
+
+        .toast.show {
+            display: flex;
+            animation: slideUp 0.3s ease;
+        }
+
+        .toast i {
+            font-size: 16px;
+        }
+
+        .toast.success {
+            background: #4cd964;
+        }
+
+        .toast.error {
+            background: #ff3b30;
+        }
+
+        .toast.warning {
+            background: #ffcc00;
+            color: #000;
+        }
+
+        /* Loading Overlay */
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.7);
+            backdrop-filter: blur(10px);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 4000;
+        }
+
+        .loading-overlay.visible {
+            display: flex;
+        }
+
+        .loading-content {
+            background: #2d2d2d;
+            padding: 32px;
+            border-radius: 20px;
+            text-align: center;
+            color: white;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid rgba(255,255,255,0.1);
+            border-top-color: #007aff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 16px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Command Suggestion Box */
+        .suggestion-box {
+            position: absolute;
+            bottom: 70px;
+            left: 20px;
+            right: 20px;
+            background: #2d2d2d;
+            border: 1px solid #3d3d3d;
+            border-radius: 12px;
+            max-height: 250px;
+            overflow-y: auto;
+            display: none;
+            z-index: 1500;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+        }
+
+        .suggestion-box.visible {
+            display: block;
+        }
+
+        .suggestion-header {
+            padding: 10px 16px;
+            background: #3d3d3d;
+            color: #8e8e93;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .suggestion-item {
+            padding: 10px 16px;
+            color: #f0f0f0;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-family: 'Menlo', 'Monaco', monospace;
+            font-size: 13px;
+            border-bottom: 1px solid #3d3d3d;
+        }
+
+        .suggestion-item:last-child {
+            border-bottom: none;
+        }
+
+        .suggestion-item:hover {
+            background: #3d3d3d;
+            color: #007aff;
+        }
+
+        .suggestion-item.selected {
+            background: #007aff;
+            color: white;
+        }
+
+        .suggestion-item small {
+            color: #8e8e93;
+            margin-left: 8px;
+            font-size: 11px;
+        }
+
+        /* Quick Commands Bar */
+        .quick-commands {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: #2d2d2d;
+            border-top: 1px solid #3d3d3d;
+            padding: 8px 16px;
+            display: flex;
+            gap: 8px;
+            overflow-x: auto;
+            z-index: 100;
+        }
+
+        .quick-commands.hidden {
+            display: none;
+        }
+
+        .quick-command-btn {
+            background: #3d3d3d;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 16px;
+            color: #f0f0f0;
+            font-size: 12px;
+            font-family: 'Menlo', 'Monaco', monospace;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: all 0.2s;
+        }
+
+        .quick-command-btn:hover {
+            background: #007aff;
+        }
+
+        .quick-command-btn:active {
+            transform: scale(0.95);
+        }
+
+        /* Context Menu */
+        .context-menu {
+            position: absolute;
+            background: #2d2d2d;
+            border: 1px solid #3d3d3d;
+            border-radius: 12px;
+            padding: 8px 0;
+            min-width: 180px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+            display: none;
+            z-index: 2000;
+        }
+
+        .context-menu.visible {
+            display: block;
+        }
+
+        .context-menu-item {
+            padding: 10px 16px;
+            color: #f0f0f0;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .context-menu-item:hover {
+            background: #3d3d3d;
+        }
+
+        .context-menu-item i {
+            width: 18px;
+            color: #8e8e93;
+        }
+
+        .context-menu-divider {
+            height: 1px;
+            background: #3d3d3d;
+            margin: 8px 0;
+        }
+
+        /* Animations */
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translate(-50%, 20px);
+            }
+            to {
+                opacity: 1;
+                transform: translate(-50%, 0);
+            }
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        .pulse {
+            animation: pulse 2s infinite;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .login-card {
+                width: 90%;
+                padding: 24px;
+            }
+            
+            .terminal-toolbar {
+                padding: 8px;
+                gap: 8px;
+            }
+            
+            .terminal-title {
+                font-size: 12px;
+            }
+            
+            .quick-commands {
+                padding: 8px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .login-title {
+                font-size: 20px;
+            }
+            
+            .terminal-toolbar i {
+                font-size: 16px;
+            }
+            
+            .connection-status span {
+                display: none;
+            }
+            
+            .quick-command-btn {
+                padding: 4px 10px;
+                font-size: 11px;
+            }
+        }
+
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+            width: 10px;
+            height: 10px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #2d2d2d;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #4a4a4a;
+            border-radius: 5px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #5a5a5a;
+        }
+
+        /* Terminal selection */
+        ::selection {
+            background: #007aff;
+            color: white;
+        }
+    </style>
+</head>
+<body class="dark">
+    <!-- iOS Status Bar -->
+    <div class="ios-status-bar" id="statusBar">
+        <span class="time" id="currentTime">9:41</span>
+        <span class="status-icons">
+            <i class="f7-icons">signal_bars</i>
+            <i class="f7-icons">wifi</i>
+            <i class="f7-icons">battery_25</i>
+        </span>
+    </div>
+
+    <!-- Login Screen -->
+    <div id="loginScreen" class="login-screen">
+        <div class="login-card">
+            <div class="login-logo">
+                <i class="f7-icons">lock_shield_fill</i>
+            </div>
+            <div class="login-title">SecureTerminal</div>
+            <div class="login-subtitle">Enter password to access system shell</div>
+            
+            <div class="login-field">
+                <label>Password</label>
+                <input type="password" id="passwordInput" class="login-input" placeholder="••••••••" autofocus>
+            </div>
+            
+            <button id="loginButton" class="login-button">
+                <i class="f7-icons">lock_open_fill</i>
+                Unlock Terminal
+            </button>
+            
+            <div id="loginError" class="login-error"></div>
+            
+            <div class="login-info">
+                <i class="f7-icons" style="font-size: 12px; margin-right: 4px;">info_circle_fill</i>
+                <span>Default password: <strong>secure123</strong> (change in server.js)</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Terminal Container -->
+    <div id="terminalContainer" class="terminal-container">
+        <div class="terminal-toolbar">
+            <i class="f7-icons" id="newSessionBtn" title="New Session (Ctrl+Shift+N)">plus_square_fill</i>
+            <i class="f7-icons" id="clearTerminalBtn" title="Clear Terminal (Ctrl+L)">trash_fill</i>
+            <i class="f7-icons" id="themeToggleBtn" title="Toggle Theme (Ctrl+Shift+T)">moon_fill</i>
+            <i class="f7-icons" id="copyBtn" title="Copy Selection (Ctrl+Shift+C)">doc_on_doc_fill</i>
+            <i class="f7-icons" id="pasteBtn" title="Paste (Ctrl+Shift+V)">clipboard_fill</i>
+            <i class="f7-icons" id="logoutBtn" title="Logout">power_fill</i>
+            
+            <div class="terminal-title" id="terminalTitle">secure-terminal@localhost:~</div>
+            
+            <div class="connection-status" id="connectionStatus">
+                <span class="status-dot" id="statusDot"></span>
+                <span id="statusText">Disconnected</span>
+            </div>
+        </div>
+        
+        <div id="terminal"></div>
+        
+        <!-- Quick Commands Bar -->
+        <div id="quickCommands" class="quick-commands">
+            <button class="quick-command-btn" data-cmd="ls -la">ls -la</button>
+            <button class="quick-command-btn" data-cmd="pwd">pwd</button>
+            <button class="quick-command-btn" data-cmd="whoami">whoami</button>
+            <button class="quick-command-btn" data-cmd="date">date</button>
+            <button class="quick-command-btn" data-cmd="ps aux">ps aux</button>
+            <button class="quick-command-btn" data-cmd="df -h">df -h</button>
+            <button class="quick-command-btn" data-cmd="free -m">free -m</button>
+            <button class="quick-command-btn" data-cmd="netstat -tuln">netstat</button>
+            <button class="quick-command-btn" data-cmd="top -b -n 1">top</button>
+            <button class="quick-command-btn" data-cmd="ifconfig">ifconfig</button>
+        </div>
+    </div>
+
+    <!-- Command Suggestion Box -->
+    <div id="suggestionBox" class="suggestion-box">
+        <div class="suggestion-header">Command Suggestions</div>
+        <div id="suggestionList"></div>
+    </div>
+
+    <!-- Context Menu -->
+    <div id="contextMenu" class="context-menu">
+        <div class="context-menu-item" data-action="copy">
+            <i class="f7-icons">doc_on_doc</i>
+            Copy
+        </div>
+        <div class="context-menu-item" data-action="paste">
+            <i class="f7-icons">clipboard</i>
+            Paste
+        </div>
+        <div class="context-menu-divider"></div>
+        <div class="context-menu-item" data-action="clear">
+            <i class="f7-icons">trash</i>
+            Clear
+        </div>
+        <div class="context-menu-item" data-action="select-all">
+            <i class="f7-icons">text_cursor</i>
+            Select All
+        </div>
+        <div class="context-menu-divider"></div>
+        <div class="context-menu-item" data-action="interrupt">
+            <i class="f7-icons">stop</i>
+            Interrupt (Ctrl+C)
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="toast">
+        <i class="f7-icons" id="toastIcon">info_circle_fill</i>
+        <span id="toastMessage"></span>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="loading-overlay">
+        <div class="loading-content">
+            <div class="spinner"></div>
+            <div id="loadingMessage">Connecting to secure shell...</div>
+        </div>
+    </div>
+
+    <!-- Dependencies -->
+    <script src="https://cdn.jsdelivr.net/npm/framework7@8.3.4/framework7-bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm/lib/xterm.js"></script>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/js-cookie@3.0.1/dist/js.cookie.min.js"></script>
+
+    <script>
+        // Initialize Framework7
+        const f7 = new Framework7({
+            el: 'body',
+            name: 'SecureTerminal',
+            id: 'com.secureterminal.app',
+            theme: 'ios',
+            ios: {
+                animateNavBackIcon: true
+            }
+        });
+
+        // Configuration
+        const CONFIG = {
+            SOCKET_URL: window.location.origin,
+            AUTH_TOKEN_KEY: 'authToken',
+            COMMAND_HISTORY_SIZE: 100,
+            SUGGEST_COMMANDS: true,
+            RECONNECT_ATTEMPTS: 5,
+            RECONNECT_DELAY: 1000
+        };
+
+        // Common Unix/Linux commands for suggestions
+        const COMMON_COMMANDS = [
+            { cmd: 'ls', desc: 'List directory contents' },
+            { cmd: 'cd', desc: 'Change directory' },
+            { cmd: 'pwd', desc: 'Print working directory' },
+            { cmd: 'cat', desc: 'Concatenate files' },
+            { cmd: 'grep', desc: 'Search text patterns' },
+            { cmd: 'find', desc: 'Find files' },
+            { cmd: 'ps', desc: 'Process status' },
+            { cmd: 'kill', desc: 'Kill processes' },
+            { cmd: 'cp', desc: 'Copy files' },
+            { cmd: 'mv', desc: 'Move files' },
+            { cmd: 'rm', desc: 'Remove files' },
+            { cmd: 'mkdir', desc: 'Make directory' },
+            { cmd: 'rmdir', desc: 'Remove directory' },
+            { cmd: 'chmod', desc: 'Change permissions' },
+            { cmd: 'chown', desc: 'Change owner' },
+            { cmd: 'ssh', desc: 'SSH client' },
+            { cmd: 'scp', desc: 'Secure copy' },
+            { cmd: 'wget', desc: 'Download files' },
+            { cmd: 'curl', desc: 'Transfer data' },
+            { cmd: 'tar', desc: 'Archive files' },
+            { cmd: 'gzip', desc: 'Compress files' },
+            { cmd: 'gunzip', desc: 'Decompress files' },
+            { cmd: 'apt', desc: 'Package manager' },
+            { cmd: 'yum', desc: 'Package manager' },
+            { cmd: 'npm', desc: 'Node package manager' },
+            { cmd: 'git', desc: 'Version control' },
+            { cmd: 'docker', desc: 'Container platform' },
+            { cmd: 'top', desc: 'Process monitor' },
+            { cmd: 'htop', desc: 'Interactive process viewer' },
+            { cmd: 'free', desc: 'Memory usage' },
+            { cmd: 'df', desc: 'Disk usage' },
+            { cmd: 'du', desc: 'Directory usage' },
+            { cmd: 'ifconfig', desc: 'Network interface' },
+            { cmd: 'ip', desc: 'IP commands' },
+            { cmd: 'ping', desc: 'Network connectivity' },
+            { cmd: 'traceroute', desc: 'Trace network path' },
+            { cmd: 'netstat', desc: 'Network statistics' },
+            { cmd: 'ss', desc: 'Socket statistics' },
+            { cmd: 'nmap', desc: 'Network scanner' },
+            { cmd: 'python', desc: 'Python interpreter' },
+            { cmd: 'node', desc: 'Node.js interpreter' },
+            { cmd: 'ruby', desc: 'Ruby interpreter' },
+            { cmd: 'php', desc: 'PHP interpreter' },
+            { cmd: 'perl', desc: 'Perl interpreter' },
+            { cmd: 'vim', desc: 'Text editor' },
+            { cmd: 'nano', desc: 'Text editor' },
+            { cmd: 'emacs', desc: 'Text editor' },
+            { cmd: 'less', desc: 'Page viewer' },
+            { cmd: 'more', desc: 'Page viewer' },
+            { cmd: 'head', desc: 'First lines' },
+            { cmd: 'tail', desc: 'Last lines' },
+            { cmd: 'echo', desc: 'Print text' },
+            { cmd: 'printf', desc: 'Formatted print' },
+            { cmd: 'date', desc: 'Show date' },
+            { cmd: 'cal', desc: 'Calendar' },
+            { cmd: 'bc', desc: 'Calculator' },
+            { cmd: 'expr', desc: 'Evaluate expressions' },
+            { cmd: 'sudo', desc: 'Superuser do' },
+            { cmd: 'su', desc: 'Switch user' },
+            { cmd: 'passwd', desc: 'Change password' },
+            { cmd: 'whoami', desc: 'Current user' },
+            { cmd: 'id', desc: 'User identity' },
+            { cmd: 'groups', desc: 'User groups' },
+            { cmd: 'man', desc: 'Manual pages' },
+            { cmd: 'info', desc: 'Info pages' },
+            { cmd: 'help', desc: 'Shell help' },
+            { cmd: 'which', desc: 'Locate command' },
+            { cmd: 'whereis', desc: 'Locate binary' },
+            { cmd: 'history', desc: 'Command history' },
+            { cmd: 'alias', desc: 'Create alias' },
+            { cmd: 'unalias', desc: 'Remove alias' },
+            { cmd: 'export', desc: 'Export variable' },
+            { cmd: 'unset', desc: 'Unset variable' },
+            { cmd: 'source', desc: 'Execute file' },
+            { cmd: 'exec', desc: 'Execute command' },
+            { cmd: 'eval', desc: 'Evaluate string' },
+            { cmd: 'trap', desc: 'Signal handler' },
+            { cmd: 'wait', desc: 'Wait for process' },
+            { cmd: 'jobs', desc: 'List jobs' },
+            { cmd: 'fg', desc: 'Foreground job' },
+            { cmd: 'bg', desc: 'Background job' },
+            { cmd: 'disown', desc: 'Remove job' },
+            { cmd: 'nohup', desc: 'Ignore hangup' },
+            { cmd: 'screen', desc: 'Terminal multiplexer' },
+            { cmd: 'tmux', desc: 'Terminal multiplexer' },
+            { cmd: 'systemctl', desc: 'System control' },
+            { cmd: 'service', desc: 'Service management' },
+            { cmd: 'journalctl', desc: 'Journal logs' },
+            { cmd: 'mount', desc: 'Mount filesystem' },
+            { cmd: 'umount', desc: 'Unmount filesystem' },
+            { cmd: 'fdisk', desc: 'Partition tool' },
+            { cmd: 'adduser', desc: 'Add user' },
+            { cmd: 'useradd', desc: 'Add user' },
+            { cmd: 'usermod', desc: 'Modify user' },
+            { cmd: 'userdel', desc: 'Delete user' },
+            { cmd: 'groupadd', desc: 'Add group' },
+            { cmd: 'groupmod', desc: 'Modify group' },
+            { cmd: 'groupdel', desc: 'Delete group' }
+        ];
+
+        // State
+        const state = {
+            socket: null,
+            term: null,
+            authenticated: false,
+            connected: false,
+            authToken: Cookies.get(CONFIG.AUTH_TOKEN_KEY),
+            commandHistory: [],
+            historyIndex: -1,
+            currentInput: '',
+            suggestions: [],
+            suggestionIndex: -1,
+            reconnectAttempts: 0,
+            reconnectTimer: null,
+            lastActivity: Date.now()
+        };
+
+        // DOM Elements
+        const elements = {
+            loginScreen: document.getElementById('loginScreen'),
+            terminalContainer: document.getElementById('terminalContainer'),
+            passwordInput: document.getElementById('passwordInput'),
+            loginButton: document.getElementById('loginButton'),
+            loginError: document.getElementById('loginError'),
+            statusDot: document.getElementById('statusDot'),
+            statusText: document.getElementById('statusText'),
+            terminalTitle: document.getElementById('terminalTitle'),
+            newSessionBtn: document.getElementById('newSessionBtn'),
+            clearTerminalBtn: document.getElementById('clearTerminalBtn'),
+            themeToggleBtn: document.getElementById('themeToggleBtn'),
+            copyBtn: document.getElementById('copyBtn'),
+            pasteBtn: document.getElementById('pasteBtn'),
+            logoutBtn: document.getElementById('logoutBtn'),
+            toast: document.getElementById('toast'),
+            toastIcon: document.getElementById('toastIcon'),
+            toastMessage: document.getElementById('toastMessage'),
+            loadingOverlay: document.getElementById('loadingOverlay'),
+            loadingMessage: document.getElementById('loadingMessage'),
+            suggestionBox: document.getElementById('suggestionBox'),
+            suggestionList: document.getElementById('suggestionList'),
+            contextMenu: document.getElementById('contextMenu'),
+            quickCommands: document.querySelectorAll('.quick-command-btn'),
+            currentTime: document.getElementById('currentTime')
+        };
+
+        // Utility Functions
+        function showToast(message, type = 'info', duration = 3000) {
+            elements.toast.className = 'toast ' + type;
+            elements.toastIcon.className = `f7-icons ${type === 'success' ? 'checkmark_circle_fill' : type === 'error' ? 'xmark_circle_fill' : 'info_circle_fill'}`;
+            elements.toastMessage.textContent = message;
+            elements.toast.classList.add('show');
+            
+            setTimeout(() => {
+                elements.toast.classList.remove('show');
+            }, duration);
+        }
+
+        function showLoading(message = 'Loading...') {
+            elements.loadingMessage.textContent = message;
+            elements.loadingOverlay.classList.add('visible');
+        }
+
+        function hideLoading() {
+            elements.loadingOverlay.classList.remove('visible');
+        }
+
+        function updateTime() {
+            const now = new Date();
+            const hours = now.getHours().toString().padStart(2, '0');
+            const minutes = now.getMinutes().toString().padStart(2, '0');
+            elements.currentTime.textContent = `${hours}:${minutes}`;
+        }
+
+        setInterval(updateTime, 1000);
+
+        // Authentication
+        async function login() {
+            const password = elements.passwordInput.value;
+            
+            if (!password) {
+                elements.loginError.textContent = 'Please enter password';
+                return;
+            }
+            
+            showLoading('Authenticating...');
+            elements.loginError.textContent = '';
+            
+            try {
+                const response = await fetch('/api/auth', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ password })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    state.authToken = data.token;
+                    Cookies.set(CONFIG.AUTH_TOKEN_KEY, data.token, { expires: 7, secure: false, sameSite: 'strict' });
+                    state.authenticated = true;
+                    
+                    elements.loginScreen.classList.add('hidden');
+                    elements.terminalContainer.classList.add('visible');
+                    
+                    initTerminal();
+                    showToast('Authentication successful', 'success');
+                    
+                    // Check session status
+                    checkSession();
+                } else {
+                    elements.loginError.textContent = data.error || 'Authentication failed';
+                    showToast(data.error || 'Authentication failed', 'error');
+                }
+            } catch (error) {
+                console.error('Login error:', error);
+                elements.loginError.textContent = 'Connection error';
+                showToast('Connection error', 'error');
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // Check session status
+        async function checkSession() {
+            try {
+                const response = await fetch('/api/status', {
+                    headers: {
+                        'x-auth-token': state.authToken
+                    }
+                });
+                
+                if (!response.ok) {
+                    logout();
+                } else {
+                    const data = await response.json();
+                    elements.terminalTitle.textContent = `secure-terminal@${data.server}:~`;
+                }
+            } catch (error) {
+                console.error('Session check failed:', error);
+            }
+        }
+
+        // Logout
+        function logout() {
+            fetch('/api/logout', {
+                method: 'POST',
+                headers: {
+                    'x-auth-token': state.authToken
+                }
+            }).finally(() => {
+                state.authenticated = false;
+                Cookies.remove(CONFIG.AUTH_TOKEN_KEY);
+                elements.terminalContainer.classList.remove('visible');
+                elements.loginScreen.classList.remove('hidden');
+                elements.passwordInput.value = '';
+                elements.passwordInput.focus();
+                
+                if (state.socket) {
+                    state.socket.disconnect();
+                }
+                
+                if (state.term) {
+                    state.term.dispose();
+                }
+                
+                showToast('Logged out', 'info');
+            });
+        }
+
+        // Initialize Terminal
+        function initTerminal() {
+            // Create xterm.js instance
+            state.term = new Terminal({
+                cursorBlink: true,
+                cursorStyle: 'block',
+                theme: {
+                    background: '#1e1e1e',
+                    foreground: '#f0f0f0',
+                    cursor: '#f0f0f0',
+                    cursorAccent: '#1e1e1e',
+                    selection: '#264f78',
+                    black: '#1e1e1e',
+                    red: '#f44336',
+                    green: '#4cd964',
+                    yellow: '#ffcc00',
+                    blue: '#2196f3',
+                    magenta: '#9c27b0',
+                    cyan: '#00bcd4',
+                    white: '#f0f0f0',
+                    brightBlack: '#666666',
+                    brightRed: '#ff5252',
+                    brightGreen: '#69f0ae',
+                    brightYellow: '#ffff00',
+                    brightBlue: '#448aff',
+                    brightMagenta: '#e040fb',
+                    brightCyan: '#18ffff',
+                    brightWhite: '#ffffff'
+                },
+                fontSize: 14,
+                fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+                lineHeight: 1.2,
+                letterSpacing: 0,
+                scrollback: 10000,
+                rendererType: 'canvas',
+                allowTransparency: true,
+                bellStyle: 'none'
+            });
+            
+            // Open terminal in container
+            state.term.open(document.getElementById('terminal'));
+            
+            // Focus terminal
+            setTimeout(() => {
+                state.term.focus();
+            }, 100);
+            
+            // Connect to WebSocket
+            connectSocket();
+            
+            // Handle terminal input
+            state.term.onData(data => {
+                if (state.socket && state.connected) {
+                    state.socket.emit('input', data);
+                    
+                    // Update current input for suggestions
+                    if (data === '\r' || data === '\n') {
+                        state.currentInput = '';
+                        hideSuggestions();
+                    } else if (data === '\x7f') { // Backspace
+                        state.currentInput = state.currentInput.slice(0, -1);
+                    } else if (data >= ' ' && data <= '~') { // Printable characters
+                        state.currentInput += data;
+                        showSuggestions(state.currentInput);
+                    }
+                }
+            });
+            
+            // Handle terminal resize
+            state.term.onResize(size => {
+                if (state.socket && state.connected) {
+                    state.socket.emit('resize', { cols: size.cols, rows: size.rows });
+                }
+            });
+            
+            // Handle key events for suggestions
+            state.term.attachCustomKeyEventHandler((e) => {
+                // Handle Tab for command completion
+                if (e.key === 'Tab') {
+                    e.preventDefault();
+                    if (state.suggestions.length > 0) {
+                        const suggestion = state.suggestions[0].cmd;
+                        state.term.write(suggestion.slice(state.currentInput.length) + ' ');
+                        state.currentInput = suggestion + ' ';
+                        hideSuggestions();
+                    }
+                    return false;
+                }
+                
+                // Handle Up arrow for history
+                if (e.key === 'ArrowUp' && !e.ctrlKey && !e.altKey) {
+                    if (state.commandHistory.length > 0) {
+                        const historyItem = state.commandHistory[state.commandHistory.length - 1];
+                        // This is simplified - full history navigation needs more work
+                    }
+                }
+                
+                // Handle Ctrl+C copy
+                if (e.ctrlKey && e.key === 'c') {
+                    if (state.term.hasSelection()) {
+                        document.execCommand('copy');
+                        showToast('Copied to clipboard', 'success');
+                        return false;
+                    }
+                }
+                
+                // Handle Ctrl+V paste
+                if (e.ctrlKey && e.key === 'v') {
+                    navigator.clipboard.readText().then(text => {
+                        if (state.socket && state.connected) {
+                            state.socket.emit('input', text);
+                        }
+                    });
+                    return false;
+                }
+                
+                // Handle Ctrl+L clear
+                if (e.ctrlKey && e.key === 'l') {
+                    e.preventDefault();
+                    if (state.socket && state.connected) {
+                        state.socket.emit('clear');
+                    }
+                    return false;
+                }
+                
+                return true;
+            });
+            
+            // Handle paste
+            state.term.onBinary(data => {
+                // Handle binary data if needed
+            });
+            
+            // Handle title change
+            state.term.onTitleChange(title => {
+                elements.terminalTitle.textContent = title || 'secure-terminal';
+            });
+            
+            // Setup command suggestions
+            if (CONFIG.SUGGEST_COMMANDS) {
+                setupSuggestions();
+            }
+        }
+
+        // Connect WebSocket
+        function connectSocket() {
+            updateConnectionStatus('connecting');
+            
+            if (state.socket) {
+                state.socket.disconnect();
+            }
+            
+            state.socket = io(CONFIG.SOCKET_URL, {
+                auth: {
+                    token: state.authToken
+                },
+                transports: ['websocket', 'polling'],
+                reconnection: true,
+                reconnectionAttempts: CONFIG.RECONNECT_ATTEMPTS,
+                reconnectionDelay: CONFIG.RECONNECT_DELAY
+            });
+            
+            state.socket.on('connect', () => {
+                console.log('Socket connected');
+                state.connected = true;
+                state.reconnectAttempts = 0;
+                updateConnectionStatus('connected');
+                showToast('Connected to secure shell', 'success');
+                
+                // Request initial directory
+                state.socket.emit('input', '\r');
+            });
+            
+            state.socket.on('output', (data) => {
+                state.term.write(data);
+                state.lastActivity = Date.now();
+            });
+            
+            state.socket.on('exit', (code) => {
+                console.log('Shell exited with code:', code);
+                showToast(`Shell exited with code ${code}`, 'warning');
+            });
+            
+            state.socket.on('error', (error) => {
+                console.error('Socket error:', error);
+                showToast('Connection error: ' + error, 'error');
+                updateConnectionStatus('disconnected');
+            });
+            
+            state.socket.on('disconnect', (reason) => {
+                console.log('Socket disconnected:', reason);
+                state.connected = false;
+                updateConnectionStatus('disconnected');
+                
+                if (reason === 'io server disconnect' || reason === 'transport close') {
+                    // Attempt reconnect
+                    attemptReconnect();
+                } else {
+                    showToast('Disconnected from shell', 'warning');
+                }
+            });
+            
+            state.socket.on('connect_error', (error) => {
+                console.error('Connection error:', error);
+                showToast('Failed to connect', 'error');
+                updateConnectionStatus('disconnected');
+                attemptReconnect();
+            });
+        }
+
+        function attemptReconnect() {
+            if (state.reconnectAttempts < CONFIG.RECONNECT_ATTEMPTS) {
+                state.reconnectAttempts++;
+                showToast(`Reconnecting... (${state.reconnectAttempts}/${CONFIG.RECONNECT_ATTEMPTS})`, 'warning');
+                
+                setTimeout(() => {
+                    if (!state.connected && state.authenticated) {
+                        connectSocket();
+                    }
+                }, CONFIG.RECONNECT_DELAY * state.reconnectAttempts);
+            } else {
+                showToast('Unable to reconnect. Please refresh.', 'error');
+            }
+        }
+
+        // Update connection status
+        function updateConnectionStatus(status) {
+            elements.statusDot.className = 'status-dot ' + status;
+            elements.statusText.textContent = status === 'connected' ? 'Connected' : 
+                                            status === 'connecting' ? 'Connecting' : 'Disconnected';
+        }
+
+        // Setup command suggestions
+        function setupSuggestions() {
+            state.term.onKey(e => {
+                const char = e.key;
+                
+                // Update current input
+                if (char >= 'a' && char <= 'z' || char >= 'A' && char <= 'Z' || 
+                    char === '/' || char === '-' || char === '_' || char === '.') {
+                    state.currentInput += char;
+                } else if (char === ' ') {
+                    state.currentInput = '';
+                    hideSuggestions();
+                } else if (char === '\x7f') { // Backspace
+                    state.currentInput = state.currentInput.slice(0, -1);
+                }
+            });
+        }
+
+        function showSuggestions(input) {
+            if (!input || input.length < 2) {
+                hideSuggestions();
+                return;
+            }
+            
+            // Filter commands that start with input
+            const matches = COMMON_COMMANDS.filter(cmd => 
+                cmd.cmd.toLowerCase().startsWith(input.toLowerCase())
+            ).slice(0, 8); // Limit to 8 suggestions
+            
+            if (matches.length > 0) {
+                state.suggestions = matches;
+                renderSuggestions(matches);
+                elements.suggestionBox.classList.add('visible');
+            } else {
+                hideSuggestions();
+            }
+        }
+
+        function renderSuggestions(suggestions) {
+            let html = '';
+            suggestions.forEach((suggestion, index) => {
+                html += `<div class="suggestion-item ${index === state.suggestionIndex ? 'selected' : ''}" data-cmd="${suggestion.cmd}">
+                    ${suggestion.cmd} <small>${suggestion.desc}</small>
+                </div>`;
+            });
+            elements.suggestionList.innerHTML = html;
+            
+            // Add click handlers
+            document.querySelectorAll('.suggestion-item').forEach(item => {
+                item.addEventListener('click', () => {
+                    const cmd = item.dataset.cmd;
+                    // Send the command to the terminal
+                    if (state.socket && state.connected) {
+                        // Clear current input and send the command
+                        for (let i = 0; i < state.currentInput.length; i++) {
+                            state.socket.emit('input', '\x7f'); // Backspace
+                        }
+                        state.socket.emit('input', cmd + ' ');
+                    }
+                    state.currentInput = cmd + ' ';
+                    hideSuggestions();
+                });
+            });
+        }
+
+        function hideSuggestions() {
+            elements.suggestionBox.classList.remove('visible');
+            state.suggestionIndex = -1;
+        }
+
+        // Event Listeners
+        elements.loginButton.addEventListener('click', login);
+        
+        elements.passwordInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                login();
+            }
+        });
+        
+        elements.newSessionBtn.addEventListener('click', () => {
+            if (state.socket) {
+                state.socket.disconnect();
+                setTimeout(() => {
+                    connectSocket();
+                }, 500);
+            }
+            showToast('Starting new session...', 'info');
+        });
+        
+        elements.clearTerminalBtn.addEventListener('click', () => {
+            state.term.clear();
+            if (state.socket && state.connected) {
+                state.socket.emit('clear');
+            }
+        });
+        
+        elements.themeToggleBtn.addEventListener('click', () => {
+            document.body.classList.toggle('dark');
+            const isDark = document.body.classList.contains('dark');
+            
+            // Update terminal theme
+            if (state.term) {
+                state.term.options.theme = isDark ? {
+                    background: '#1e1e1e',
+                    foreground: '#f0f0f0'
+                } : {
+                    background: '#ffffff',
+                    foreground: '#000000'
+                };
+            }
+            
+            elements.themeToggleBtn.className = isDark ? 'f7-icons' : 'f7-icons';
+            elements.themeToggleBtn.textContent = isDark ? 'moon_fill' : 'sun_max_fill';
+            showToast(`Switched to ${isDark ? 'dark' : 'light'} mode`, 'success');
+        });
+        
+        elements.copyBtn.addEventListener('click', () => {
+            if (state.term.hasSelection()) {
+                document.execCommand('copy');
+                showToast('Copied to clipboard', 'success');
+            } else {
+                showToast('No selection to copy', 'warning');
+            }
+        });
+        
+        elements.pasteBtn.addEventListener('click', async () => {
+            try {
+                const text = await navigator.clipboard.readText();
+                if (state.socket && state.connected) {
+                    state.socket.emit('input', text);
+                    showToast('Pasted from clipboard', 'success');
+                }
+            } catch (err) {
+                showToast('Unable to paste', 'error');
+            }
+        });
+        
+        elements.logoutBtn.addEventListener('click', logout);
+        
+        // Quick commands
+        elements.quickCommands.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const cmd = btn.dataset.cmd;
+                if (state.socket && state.connected) {
+                    state.socket.emit('input', cmd + '\r');
+                    showToast(`Executing: ${cmd}`, 'info');
+                }
+            });
+        });
+
+        // Context menu
+        document.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            
+            const x = e.clientX;
+            const y = e.clientY;
+            
+            elements.contextMenu.style.left = x + 'px';
+            elements.contextMenu.style.top = y + 'px';
+            elements.contextMenu.classList.add('visible');
+            
+            // Close on click outside
+            setTimeout(() => {
+                document.addEventListener('click', closeContextMenu, { once: true });
+            }, 100);
+        });
+
+        function closeContextMenu() {
+            elements.contextMenu.classList.remove('visible');
+        }
+
+        // Context menu actions
+        document.querySelectorAll('.context-menu-item').forEach(item => {
+            item.addEventListener('click', (e) => {
+                const action = e.currentTarget.dataset.action;
+                
+                switch(action) {
+                    case 'copy':
+                        if (state.term.hasSelection()) {
+                            document.execCommand('copy');
+                            showToast('Copied to clipboard', 'success');
+                        }
+                        break;
+                    case 'paste':
+                        navigator.clipboard.readText().then(text => {
+                            if (state.socket && state.connected) {
+                                state.socket.emit('input', text);
+                            }
+                        });
+                        break;
+                    case 'clear':
+                        state.term.clear();
+                        if (state.socket && state.connected) {
+                            state.socket.emit('clear');
+                        }
+                        break;
+                    case 'select-all':
+                        state.term.selectAll();
+                        break;
+                    case 'interrupt':
+                        if (state.socket && state.connected) {
+                            state.socket.emit('interrupt');
+                        }
+                        break;
+                }
+                
+                closeContextMenu();
+            });
+        });
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            // Ctrl+Shift+N: New session
+            if (e.ctrlKey && e.shiftKey && e.key === 'N') {
+                e.preventDefault();
+                elements.newSessionBtn.click();
+            }
+            
+            // Ctrl+Shift+T: Toggle theme
+            if (e.ctrlKey && e.shiftKey && e.key === 'T') {
+                e.preventDefault();
+                elements.themeToggleBtn.click();
+            }
+            
+            // Ctrl+Shift+C: Copy
+            if (e.ctrlKey && e.shiftKey && e.key === 'C') {
+                e.preventDefault();
+                elements.copyBtn.click();
+            }
+            
+            // Ctrl+Shift+V: Paste
+            if (e.ctrlKey && e.shiftKey && e.key === 'V') {
+                e.preventDefault();
+                elements.pasteBtn.click();
+            }
+            
+            // Escape: Close suggestion box
+            if (e.key === 'Escape') {
+                hideSuggestions();
+                closeContextMenu();
+            }
+        });
+
+        // Check for existing session
+        if (state.authToken) {
+            showLoading('Checking session...');
+            checkSession().then(() => {
+                hideLoading();
+                if (state.authenticated) {
+                    elements.loginScreen.classList.add('hidden');
+                    elements.terminalContainer.classList.add('visible');
+                    initTerminal();
+                }
+            }).catch(() => {
+                hideLoading();
+                Cookies.remove(CONFIG.AUTH_TOKEN_KEY);
+            });
+        }
+
+        // Handle page visibility change (reconnect if needed)
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden && state.authenticated && !state.connected) {
+                connectSocket();
+            }
+        });
+
+        // Handle online/offline
+        window.addEventListener('online', () => {
+            showToast('Network restored, reconnecting...', 'info');
+            if (state.authenticated && !state.connected) {
+                connectSocket();
+            }
+        });
+
+        window.addEventListener('offline', () => {
+            showToast('Network connection lost', 'warning');
+            updateConnectionStatus('disconnected');
+        });
+
+        // Handle page unload
+        window.addEventListener('beforeunload', () => {
+            if (state.socket) {
+                state.socket.disconnect();
+            }
+        });
+
+        // Initial time update
+        updateTime();
+    </script>
+</body>
+</html>
