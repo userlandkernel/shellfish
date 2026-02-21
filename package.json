@@ -1,7 +1,7 @@
 {
-  "name": "videocall-app",
+  "name": "secure-web-terminal",
   "version": "1.0.0",
-  "description": "Video Call Application with Framework7 iOS Design",
+  "description": "Password protected web terminal with real Linux shell access",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -9,20 +9,25 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [
-    "webrtc",
-    "videocall",
+    "terminal",
+    "web-terminal",
+    "shell",
+    "ssh",
+    "linux",
     "framework7",
     "ios",
-    "socket.io"
+    "secure"
   ],
   "author": "",
   "license": "MIT",
   "dependencies": {
     "express": "^4.18.2",
     "socket.io": "^4.5.4",
-    "cors": "^2.8.5",
-    "dotenv": "^16.0.3",
-    "uuid": "^9.0.0"
+    "node-pty": "^0.10.1",
+    "express-session": "^1.17.3",
+    "cookie-parser": "^1.4.6",
+    "express-rate-limit": "^6.7.0",
+    "cors": "^2.8.5"
   },
   "devDependencies": {
     "nodemon": "^2.0.20"
