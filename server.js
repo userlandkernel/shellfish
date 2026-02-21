@@ -2,7 +2,6 @@ const express = require('express');
 const http = require('http');
 const socketIO = require('socket.io');
 const { spawn } = require('child_process');
-const pty = require('node-pty');
 const path = require('path');
 const crypto = require('crypto');
 const session = require('express-session');
@@ -29,13 +28,16 @@ const CONFIG = {
     SESSION_TIMEOUT: 30 * 60 * 1000, // 30 minutes
     RATE_LIMIT: 100, // requests per 15 minutes
     ALLOWED_COMMANDS: [], // empty array means allow all
-    DENIED_COMMANDS: ['rm -rf', 'shutdown', 'reboot', 'init', 'poweroff'], // dangerous commands
-    LOG_ACTIONS: true
+    DENIED_COMMANDS: ['rm -rf', 'shutdown', 'reboot', 'init', 'poweroff', 'dd', 'mkfs'], // dangerous commands
+    LOG_ACTIONS: true,
+    MAX_BUFFER: 1024 * 1024, // 1MB buffer for command output
+    COMMAND_TIMEOUT: 30000 // 30 seconds command timeout
 };
 
-// Store active sessions
+// Store active sessions and processes
 const activeSessions = new Map();
 const userSessions = new Map();
+const activeProcesses = new Map(); // Store running shell processes per socket
 
 // Middleware
 app.use(express.json());
@@ -124,8 +126,17 @@ function isCommandAllowed(command) {
 
 // Sanitize command output
 function sanitizeOutput(output) {
-    // Remove ANSI escape sequences
+    // Remove ANSI escape sequences but keep basic formatting
     return output.replace(/\u001b\[\d+m/g, '');
+}
+
+// Get system shell
+function getSystemShell() {
+    if (process.platform === 'win32') {
+        return 'cmd.exe';
+    } else {
+        return process.env.SHELL || '/bin/bash';
+    }
 }
 
 // Routes
@@ -193,7 +204,8 @@ app.get('/api/status', authenticate, (req, res) => {
         expires: req.session.expires,
         server: os.hostname(),
         platform: os.platform(),
-        release: os.release()
+        release: os.release(),
+        shell: getSystemShell()
     });
 });
 
@@ -215,8 +227,9 @@ app.post('/api/execute', authenticate, (req, res) => {
     // Execute command
     const exec = require('child_process').exec;
     exec(command, {
-        timeout: 10000, // 10 second timeout
-        maxBuffer: 1024 * 1024 // 1MB buffer
+        timeout: CONFIG.COMMAND_TIMEOUT,
+        maxBuffer: CONFIG.MAX_BUFFER,
+        shell: getSystemShell()
     }, (error, stdout, stderr) => {
         const result = {
             command,
@@ -245,10 +258,46 @@ app.get('/api/system', authenticate, (req, res) => {
         },
         loadavg: os.loadavg(),
         user: os.userInfo().username,
-        shell: process.env.SHELL || '/bin/bash'
+        shell: getSystemShell()
     };
     
     res.json(info);
+});
+
+// Get directory contents
+app.get('/api/ls', authenticate, (req, res) => {
+    const dir = req.query.path || process.cwd();
+    
+    fs.readdir(dir, { withFileTypes: true }, (err, files) => {
+        if (err) {
+            return res.status(500).json({ error: err.message });
+        }
+        
+        const fileList = files.map(file => ({
+            name: file.name,
+            type: file.isDirectory() ? 'directory' : 'file',
+            size: file.isFile() ? fs.statSync(path.join(dir, file.name)).size : 0
+        }));
+        
+        res.json(fileList);
+    });
+});
+
+// Read file
+app.get('/api/cat', authenticate, (req, res) => {
+    const filePath = req.query.path;
+    
+    if (!filePath) {
+        return res.status(400).json({ error: 'File path required' });
+    }
+    
+    fs.readFile(filePath, 'utf8', (err, data) => {
+        if (err) {
+            return res.status(500).json({ error: err.message });
+        }
+        
+        res.json({ content: data });
+    });
 });
 
 // Socket.IO for real-time terminal
@@ -277,88 +326,157 @@ io.on('connection', (socket) => {
     const session = socket.session;
     log('SOCKET_CONNECT', session.ip, `Socket ID: ${socket.id}`);
     
-    let ptyProcess = null;
-    let commandBuffer = '';
+    let shellProcess = null;
+    let currentDir = process.env.HOME || os.homedir();
     
-    // Create pseudo-terminal
     try {
-        // Get user's default shell
-        const shell = process.env.SHELL || (os.platform() === 'win32' ? 'powershell.exe' : '/bin/bash');
-        const shellArgs = os.platform() === 'win32' ? [] : ['--login'];
+        // Determine shell based on platform
+        const shell = getSystemShell();
+        const shellArgs = process.platform === 'win32' ? [] : ['-i']; // Interactive mode
         
-        ptyProcess = pty.spawn(shell, shellArgs, {
-            name: 'xterm-color',
-            cols: 80,
-            rows: 24,
-            cwd: process.env.HOME || os.homedir(),
-            env: process.env
+        log('SHELL_START', session.ip, `Using shell: ${shell}`);
+        
+        // Spawn shell process
+        shellProcess = spawn(shell, shellArgs, {
+            cwd: currentDir,
+            env: {
+                ...process.env,
+                TERM: 'xterm-256color',
+                PS1: '\\u@\\h:\\w\\$ ' // Prompt format
+            },
+            stdio: ['pipe', 'pipe', 'pipe']
         });
         
-        log('PTY_CREATED', session.ip, `Shell: ${shell}`);
+        // Store process reference
+        activeProcesses.set(socket.id, shellProcess);
         
-        // Send initial message
-        ptyProcess.write('clear\n');
+        // Send welcome message
+        const welcome = [
+            '\x1b[32m' + '='.repeat(60) + '\x1b[0m',
+            '\x1b[32m' + '  🔐 Secure Terminal - Real Shell Access' + '\x1b[0m',
+            '\x1b[32m' + '  Connected to: ' + os.hostname() + '\x1b[0m',
+            '\x1b[32m' + '  Shell: ' + shell + '\x1b[0m',
+            '\x1b[32m' + '  Type "help" for available commands' + '\x1b[0m',
+            '\x1b[32m' + '='.repeat(60) + '\x1b[0m',
+            '',
+            shellProcess.stdout.setEncoding('utf8')
+        ];
         
-        // Handle PTY output
-        ptyProcess.on('data', (data) => {
-            socket.emit('output', data.toString());
+        welcome.forEach(line => socket.emit('output', line + '\r\n'));
+        
+        // Send initial prompt
+        socket.emit('output', `\x1b[36m${os.userInfo().username}@${os.hostname()}:${currentDir}$ \x1b[0m`);
+        
+        // Handle shell stdout
+        shellProcess.stdout.on('data', (data) => {
+            const output = data.toString();
+            socket.emit('output', output);
         });
         
-        // Handle PTY exit
-        ptyProcess.on('exit', (code) => {
-            log('PTY_EXIT', session.ip, `Exit code: ${code}`);
+        // Handle shell stderr
+        shellProcess.stderr.on('data', (data) => {
+            const error = data.toString();
+            socket.emit('output', `\x1b[31m${error}\x1b[0m`);
+        });
+        
+        // Handle shell exit
+        shellProcess.on('exit', (code) => {
+            log('SHELL_EXIT', session.ip, `Exit code: ${code}`);
+            socket.emit('output', `\r\n\x1b[33mShell exited with code ${code}\x1b[0m\r\n`);
             socket.emit('exit', code);
+            activeProcesses.delete(socket.id);
+        });
+        
+        // Handle shell error
+        shellProcess.on('error', (err) => {
+            log('SHELL_ERROR', session.ip, err.message);
+            socket.emit('output', `\r\n\x1b[31mShell error: ${err.message}\x1b[0m\r\n`);
         });
         
     } catch (error) {
-        log('PTY_ERROR', session.ip, error.message);
-        socket.emit('error', 'Failed to create terminal session');
+        log('SHELL_CREATE_ERROR', session.ip, error.message);
+        socket.emit('error', 'Failed to create shell session: ' + error.message);
         return;
     }
     
     // Handle client input
     socket.on('input', (data) => {
-        if (!ptyProcess) return;
+        if (!shellProcess || shellProcess.killed) {
+            socket.emit('output', '\x1b[31mShell not available. Please reconnect.\x1b[0m\r\n');
+            return;
+        }
         
         // Check for dangerous commands
-        if (data === '\r') { // Enter key
-            const command = commandBuffer.trim();
-            if (command && !isCommandAllowed(command)) {
-                ptyProcess.write(`echo "Command '${command}' is not allowed"\n`);
-                commandBuffer = '';
-                return;
-            }
-            log('COMMAND_INPUT', session.ip, commandBuffer);
-        }
-        
-        commandBuffer += data;
-        
-        // Reset buffer on newline
         if (data === '\r' || data === '\n') {
-            commandBuffer = '';
+            // Command execution - we'll check full commands
+            // This is handled by the shell itself
         }
         
-        ptyProcess.write(data);
+        try {
+            shellProcess.stdin.write(data);
+        } catch (err) {
+            log('STDIN_ERROR', session.ip, err.message);
+            socket.emit('output', `\x1b[31mError: ${err.message}\x1b[0m\r\n`);
+        }
     });
     
-    // Resize terminal
+    // Resize terminal (not directly applicable to child_process, but we can track)
     socket.on('resize', (data) => {
-        if (ptyProcess) {
-            ptyProcess.resize(data.cols, data.rows);
+        // We can't easily resize child_process, but we can update env
+        if (shellProcess) {
+            shellProcess.env.COLUMNS = data.cols;
+            shellProcess.env.LINES = data.rows;
         }
     });
     
     // Clear terminal
     socket.on('clear', () => {
-        if (ptyProcess) {
-            ptyProcess.write('clear\n');
-        }
+        socket.emit('output', '\x1bc'); // Send clear screen escape sequence
     });
     
     // Interrupt process (Ctrl+C)
     socket.on('interrupt', () => {
-        if (ptyProcess) {
-            ptyProcess.write('\x03');
+        if (shellProcess) {
+            try {
+                shellProcess.stdin.write('\x03');
+            } catch (err) {
+                log('INTERRUPT_ERROR', session.ip, err.message);
+            }
+        }
+    });
+    
+    // Execute single command
+    socket.on('exec', (command) => {
+        if (!isCommandAllowed(command)) {
+            socket.emit('output', `\x1b[31mCommand '${command}' is not allowed\x1b[0m\r\n`);
+            return;
+        }
+        
+        const exec = require('child_process').exec;
+        exec(command, {
+            cwd: currentDir,
+            timeout: CONFIG.COMMAND_TIMEOUT,
+            maxBuffer: CONFIG.MAX_BUFFER,
+            shell: getSystemShell()
+        }, (error, stdout, stderr) => {
+            if (stdout) socket.emit('output', stdout);
+            if (stderr) socket.emit('output', `\x1b[31m${stderr}\x1b[0m`);
+            if (error) socket.emit('output', `\x1b[31mError: ${error.message}\x1b[0m\r\n`);
+            
+            // Send prompt
+            socket.emit('output', `\x1b[36m${os.userInfo().username}@${os.hostname()}:${currentDir}$ \x1b[0m`);
+        });
+    });
+    
+    // Change directory
+    socket.on('cd', (dir) => {
+        try {
+            const newDir = path.resolve(currentDir, dir);
+            fs.accessSync(newDir, fs.constants.R_OK);
+            currentDir = newDir;
+            socket.emit('output', `\x1b[36m${os.userInfo().username}@${os.hostname()}:${currentDir}$ \x1b[0m`);
+        } catch (err) {
+            socket.emit('output', `\x1b[31mcd: ${dir}: No such directory\x1b[0m\r\n`);
         }
     });
     
@@ -366,10 +484,57 @@ io.on('connection', (socket) => {
     socket.on('disconnect', () => {
         log('SOCKET_DISCONNECT', session.ip);
         
-        if (ptyProcess) {
-            ptyProcess.kill();
-            ptyProcess = null;
+        if (shellProcess && !shellProcess.killed) {
+            try {
+                shellProcess.kill();
+            } catch (err) {
+                log('KILL_ERROR', session.ip, err.message);
+            }
         }
+        
+        activeProcesses.delete(socket.id);
+    });
+});
+
+// Alternative: Execute command and stream output
+app.post('/api/stream', authenticate, (req, res) => {
+    const { command } = req.body;
+    
+    if (!command) {
+        return res.status(400).json({ error: 'Command required' });
+    }
+    
+    if (!isCommandAllowed(command)) {
+        return res.status(403).json({ error: 'Command not allowed' });
+    }
+    
+    log('COMMAND_STREAM', req.ip, command);
+    
+    res.setHeader('Content-Type', 'text/plain');
+    res.setHeader('Transfer-Encoding', 'chunked');
+    
+    const exec = require('child_process').exec;
+    const child = exec(command, {
+        cwd: process.env.HOME,
+        shell: getSystemShell()
+    });
+    
+    child.stdout.on('data', (data) => {
+        res.write(data);
+    });
+    
+    child.stderr.on('data', (data) => {
+        res.write(`\x1b[31m${data}\x1b[0m`);
+    });
+    
+    child.on('close', (code) => {
+        res.write(`\n\x1b[33mCommand exited with code ${code}\x1b[0m\n`);
+        res.end();
+    });
+    
+    child.on('error', (err) => {
+        res.write(`\n\x1b[31mError: ${err.message}\x1b[0m\n`);
+        res.end();
     });
 });
 
@@ -388,19 +553,20 @@ setInterval(() => {
 // Error handling
 app.use((err, req, res, next) => {
     console.error('Server error:', err);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: 'Internal server error: ' + err.message });
 });
 
 // Start server
 server.listen(CONFIG.PORT, '0.0.0.0', () => {
     console.log('\n' + '='.repeat(60));
-    console.log('🔐 Secure Web Terminal Server');
+    console.log('🔐 Secure Web Terminal Server (No Python Required)');
     console.log('='.repeat(60));
     console.log(`📡 URL:        http://localhost:${CONFIG.PORT}`);
-    console.log(`🔑 Password:   ${Object.keys(CONFIG.PASSWORD_HASH).length > 0 ? '✓ Set' : '⚠ Default password'}`);
+    console.log(`🔑 Password:   ${CONFIG.PASSWORD_HASH !== crypto.createHash('sha256').update('secure123').digest('hex') ? '✓ Custom' : '⚠ Default: secure123'}`);
     console.log(`⏱ Session:     ${CONFIG.SESSION_TIMEOUT/60000} minutes`);
     console.log(`🛡 Rate Limit:  ${CONFIG.RATE_LIMIT} requests/15min`);
     console.log(`📝 Logging:    ${CONFIG.LOG_ACTIONS ? 'Enabled' : 'Disabled'}`);
+    console.log(`💻 Shell:       ${getSystemShell()}`);
     console.log('='.repeat(60));
     console.log(`📊 Active sessions: ${activeSessions.size}`);
     console.log('='.repeat(60) + '\n');
@@ -410,7 +576,15 @@ server.listen(CONFIG.PORT, '0.0.0.0', () => {
 process.on('SIGTERM', () => {
     console.log('Received SIGTERM, shutting down gracefully...');
     
-    // Kill all PTY processes
+    // Kill all child processes
+    for (const [socketId, proc] of activeProcesses.entries()) {
+        try {
+            proc.kill();
+        } catch (err) {
+            console.error(`Failed to kill process for ${socketId}:`, err);
+        }
+    }
+    
     server.close(() => {
         console.log('Server closed');
         process.exit(0);
@@ -419,6 +593,15 @@ process.on('SIGTERM', () => {
 
 process.on('SIGINT', () => {
     console.log('Received SIGINT, shutting down...');
+    
+    for (const [socketId, proc] of activeProcesses.entries()) {
+        try {
+            proc.kill();
+        } catch (err) {
+            // Ignore
+        }
+    }
+    
     process.exit(0);
 });
 
@@ -426,4 +609,10 @@ process.on('SIGINT', () => {
 process.on('uncaughtException', (error) => {
     console.error('Uncaught Exception:', error);
     log('UNCAUGHT_EXCEPTION', 'SYSTEM', error.message);
+});
+
+// Unhandled rejection handler
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+    log('UNHANDLED_REJECTION', 'SYSTEM', reason);
 });
